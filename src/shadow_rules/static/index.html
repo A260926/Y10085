@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配置影子演算室</title>
+<style>
+:root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --fg:#e2e8f0;
+  --muted:#94a3b8; --accent:#38bdf8; --good:#4ade80; --warn:#fbbf24; --bad:#f87171; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background:var(--bg); color:var(--fg); line-height:1.5; }
+header { padding:20px 28px; border-bottom:1px solid var(--line);
+  display:flex; align-items:baseline; gap:14px; }
+header h1 { font-size:22px; margin:0; }
+header .sub { color:var(--muted); font-size:13px; }
+main { padding:22px 28px; display:grid; grid-template-columns: 360px 1fr; gap:20px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+  padding:16px; margin-bottom:18px; }
+.card h2 { font-size:15px; margin:0 0 12px; color:var(--accent); }
+label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+input, select, textarea { width:100%; background:#0b1220; color:var(--fg);
+  border:1px solid var(--line); border-radius:6px; padding:8px; font-size:13px;
+  font-family: ui-monospace, Menlo, monospace; }
+textarea { min-height:90px; resize:vertical; }
+button { background:var(--accent); color:#06283d; border:0; border-radius:6px;
+  padding:8px 14px; font-weight:600; cursor:pointer; margin-top:10px; font-size:13px; }
+button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--line);
+  vertical-align:top; }
+th { color:var(--muted); font-weight:500; font-size:12px; }
+.pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; }
+.pill.ok { background:#14532d; color:var(--good); }
+.pill.bad { background:#450a0a; color:var(--bad); }
+.pill.warn { background:#422006; color:var(--warn); }
+.pill.info { background:#0c4a6e; color:var(--accent); }
+.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+.muted { color:var(--muted); font-size:12px; }
+.side { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.side .box { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:10px; }
+.trace { color:var(--muted); font-size:12px; margin-top:6px; word-break:break-all; }
+.req { cursor:pointer; }
+.req:hover { background:#243449; }
+.decision-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.decision-row select, .decision-row input { width:auto; flex:1; min-width:120px; }
+.verdict-accept { color:var(--good); }
+.verdict-block { color:var(--bad); }
+.verdict-exception { color:var(--warn); }
+#msg { position:fixed; right:18px; bottom:18px; max-width:420px; display:none;
+  background:#0b1220; border:1px solid var(--warn); border-radius:8px; padding:12px;
+  font-size:13px; white-space:pre-wrap; z-index:10; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>配置影子演算室</h1>
+  <span class="sub">同一批历史请求并行送入当前版本与候选版本，解释两边决策差异</span>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <h2>① 上传规则版本</h2>
+      <label>名称</label>
+      <input id="rule-name" placeholder="例如：准入规则 v3">
+      <label>父版本（可空）</label>
+      <select id="rule-parent"><option value="">（无父版本）</option></select>
+      <label>受限 JSON 表达式（不支持 Python 代码）</label>
+      <textarea id="rule-body" placeholder='{"or":[{"field":"x"},{"lit":false}]}'></textarea>
+      <button onclick="uploadRule()">上传并保存版本</button>
+      <div id="rule-result" class="muted" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>② 创建演算批次（开始即冻结输入）</h2>
+      <label>当前版本</label>
+      <select id="batch-current"></select>
+      <label>候选版本</label>
+      <select id="batch-candidate"></select>
+      <label>secret 路径（逗号分隔，仅可判断存在性）</label>
+      <input id="batch-secrets" value="auth.token">
+      <label>脱敏请求数组（JSON）</label>
+      <textarea id="batch-requests" style="min-height:150px"></textarea>
+      <label>幂等键（相同键+相同输入直接返回原批次）</label>
+      <input id="batch-key" value="seed-demo-batch">
+      <button onclick="createBatch()">开始演算</button>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>③ 批次列表</h2>
+      <table>
+        <thead><tr><th>批次</th><th>状态</th><th>修订</th><th>差异/总数</th><th>创建时间</th><th></th></tr></thead>
+        <tbody id="batch-rows"></tbody>
+      </table>
+    </div>
+    <div class="card" id="detail-card" style="display:none">
+      <h2>④ 逐条结果 · 字段轨迹 · 短路路径 · 决议</h2>
+      <div id="batch-meta" class="muted" style="margin-bottom:10px"></div>
+      <div id="request-list"></div>
+      <p class="muted">提示：secret 值已脱敏，仅记录“存在/不存在”访问；导出同样不含秘密。</p>
+      <button class="ghost" onclick="exportBatch()">导出差异与决议（JSON）</button>
+    </div>
+  </div>
+</main>
+<div id="msg"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

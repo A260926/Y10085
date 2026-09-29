@@ -26,6 +26,10 @@ Pods/
 .env
 .env.*
 *.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 coverage/
 .coverage
 .nyc_output/

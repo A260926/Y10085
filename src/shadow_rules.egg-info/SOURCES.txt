@@ -1,0 +1,17 @@
+pyproject.toml
+src/shadow_rules/__init__.py
+src/shadow_rules/__main__.py
+src/shadow_rules/clock.py
+src/shadow_rules/engine.py
+src/shadow_rules/models.py
+src/shadow_rules/redaction.py
+src/shadow_rules/seed.py
+src/shadow_rules/service.py
+src/shadow_rules/store.py
+src/shadow_rules/web.py
+src/shadow_rules.egg-info/PKG-INFO
+src/shadow_rules.egg-info/SOURCES.txt
+src/shadow_rules.egg-info/dependency_links.txt
+src/shadow_rules.egg-info/entry_points.txt
+src/shadow_rules.egg-info/requires.txt
+src/shadow_rules.egg-info/top_level.txt
