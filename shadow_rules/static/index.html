@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>配置影子演算室</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0;
+         background: #f5f6f8; color: #222; }
+  header { background: #1f2a44; color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { padding: 20px 24px; display: grid; gap: 20px;
+         grid-template-columns: 1fr 2fr; }
+  section { background: #fff; border-radius: 8px; padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h2 { font-size: 15px; margin: 0 0 10px; color: #1f2a44; }
+  .wide { grid-column: 1 / -1; }
+  .card { border: 1px solid #e3e6ec; border-radius: 6px; padding: 10px;
+          margin-bottom: 10px; font-size: 13px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px;
+         font-size: 12px; margin-right: 6px; }
+  .tag.outcome { background: #fde2e1; color: #b3261e; }
+  .tag.path { background: #fff3cd; color: #8a6d00; }
+  .tag.none { background: #e6f4ea; color: #137333; }
+  pre { background: #f0f2f5; padding: 8px; border-radius: 4px;
+        overflow: auto; font-size: 12px; max-height: 220px; }
+  button { background: #1f2a44; color: #fff; border: 0; border-radius: 4px;
+           padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  input, select, textarea { font-size: 12px; padding: 3px 6px;
+           border: 1px solid #c8cdd5; border-radius: 4px; }
+  .decision-form { margin-top: 8px; display: flex; gap: 6px;
+                   flex-wrap: wrap; align-items: center; }
+  .muted { color: #68707d; font-size: 12px; }
+  .conflict { color: #b3261e; font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header><h1>配置影子演算室</h1></header>
+<main>
+  <section>
+    <h2>规则版本</h2>
+    <div id="rules">加载中…</div>
+  </section>
+  <section>
+    <h2>演算批次</h2>
+    <div id="batches">加载中…</div>
+  </section>
+  <section class="wide">
+    <h2>批次详情与差异</h2>
+    <div id="detail" class="muted">点击上方批次查看差异。</div>
+  </section>
+  <section class="wide">
+    <h2>脱敏请求</h2>
+    <div id="requests">加载中…</div>
+  </section>
+</main>
+<script>
+const CATEGORY_LABEL = { outcome: "不同结果", path: "同结果不同路径", none: "无差异" };
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  return { status: res.status, body: await res.json() };
+}
+const short = (s) => s ? s.slice(0, 12) + "…" : "";
+
+async function loadRules() {
+  const { body } = await api("/api/rules");
+  document.getElementById("rules").innerHTML = body.rules.map(r => `
+    <div class="card">
+      <b>#${r.id} ${r.name}</b>
+      <span class="muted">摘要 ${short(r.source_digest)} 父版本 ${r.parent_id ?? "无"}</span>
+      <pre>${JSON.stringify(r.normalized, null, 1)}</pre>
+    </div>`).join("");
+}
+
+async function loadBatches() {
+  const { body } = await api("/api/batches");
+  document.getElementById("batches").innerHTML = body.batches.map(b => `
+    <div class="card">
+      <b>${b.idempotency_key}</b>
+      <span class="muted">修订 r${b.revision} · ${b.status}</span>
+      <button onclick="loadDetail('${b.id}')">查看差异</button>
+      <div class="muted">输入摘要 ${short(b.input_digest)}
+        ${b.summary ? `· 差异 ${b.summary.categories.outcome} 结果 / ${b.summary.categories.path} 路径` : ""}</div>
+    </div>`).join("");
+}
+
+function traceView(title, result) {
+  return `<div><b>${title}</b>: ${result.outcome === null ? "错误(" + result.error + ")" : result.outcome}
+    <div class="muted">访问字段: ${result.accessed_fields.join(", ") || "无"}</div>
+    <pre>${JSON.stringify(result.trace, null, 1)}</pre></div>`;
+}
+
+async function loadDetail(batchId) {
+  const { body } = await api(`/api/batches/${batchId}`);
+  const el = document.getElementById("detail");
+  el.innerHTML = `<div class="muted">批次 ${body.id} · 修订 r${body.revision} · 输入摘要 ${short(body.input_digest)}</div>` +
+    body.diffs.map(d => `
+    <div class="card">
+      <span class="tag ${d.category}">${CATEGORY_LABEL[d.category]}</span>
+      <b>${d.request_id}</b>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${traceView("当前版本 A", d.a)}
+        ${traceView("候选版本 B", d.b)}
+      </div>
+      <div>决议: ${d.decision
+          ? `${d.decision.action} — ${d.decision.reason}${d.decision.expires_at ? " (至 " + d.decision.expires_at + ")" : ""}`
+          : "<span class='muted'>未决议</span>"}</div>
+      <div class="decision-form">
+        <select id="act-${d.request_id}">
+          <option value="accept">接受</option>
+          <option value="block">阻止</option>
+          <option value="exception">限时例外</option>
+        </select>
+        <input id="reason-${d.request_id}" placeholder="理由" size="24">
+        <input id="ttl-${d.request_id}" placeholder="例外秒数" size="6">
+        <button onclick="decide('${batchId}', '${d.request_id}', ${d.decision_version})">提交决议</button>
+        <span id="msg-${d.request_id}"></span>
+      </div>
+    </div>`).join("");
+}
+
+async function decide(batchId, requestId, version) {
+  const action = document.getElementById(`act-${requestId}`).value;
+  const reason = document.getElementById(`reason-${requestId}`).value || "(无理由)";
+  const ttl = document.getElementById(`ttl-${requestId}`).value;
+  const { status, body } = await api(`/api/batches/${batchId}/diffs/${requestId}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, reason, expected_version: version,
+                           ttl_seconds: ttl ? Number(ttl) : null }),
+  });
+  const msg = document.getElementById(`msg-${requestId}`);
+  if (status === 409) {
+    msg.innerHTML = `<span class="conflict">冲突: 对方理由「${body.current_reason}」 vs 你的理由「${body.submitted_reason}」,请刷新后重试。</span>`;
+  } else {
+    msg.textContent = "已记录";
+    loadDetail(batchId);
+  }
+}
+
+async function loadRequests() {
+  const { body } = await api("/api/requests");
+  document.getElementById("requests").innerHTML = body.requests.map(r => `
+    <div class="card"><b>${r.id}</b>
+      <span class="muted">摘要 ${short(r.digest)}</span>
+      <pre>${JSON.stringify(r.body, null, 1)}</pre>
+    </div>`).join("");
+}
+
+loadRules(); loadBatches(); loadRequests();
+</script>
+</body>
+</html>
